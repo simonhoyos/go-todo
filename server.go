@@ -2,12 +2,12 @@ package main
 
 import (
   "strconv"
-	"github.com/gofiber/fiber"
+  "github.com/gofiber/fiber"
 )
 
 type Task struct {
   Id uint64 `json:"id"`
-	Title string `json:"title"`
+  Title string `json:"title"`
 }
 
 var id uint64
@@ -17,8 +17,8 @@ func main() {
 
   var tasks []Task
 
-	app.Get("/", func(c *fiber.Ctx) error {
-		return c.JSON(tasks)
+  app.Get("/", func(c *fiber.Ctx) error {
+    return c.JSON(tasks)
   })
 
   app.Post("/", func(c *fiber.Ctx) error {
@@ -91,6 +91,6 @@ func main() {
     return c.JSON(t)
   })
 
-	app.Listen(":8000")
+  app.Listen(":8000")
 }
 
