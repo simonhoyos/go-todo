@@ -1,96 +1,165 @@
 package main
 
 import (
-  "strconv"
-  "github.com/gofiber/fiber"
+	"database/sql"
+	"fmt"
+	"log"
+	"strconv"
+
+	"github.com/gofiber/fiber/v2"
+	_ "github.com/lib/pq"
+)
+
+var db *sql.DB
+
+const (
+	host     = "localhost"
+	port     = 5432
+	user     = "postgres"
+	password = "root"
+	dbname   = "tasks"
 )
 
 type Task struct {
-  Id uint64 `json:"id"`
-  Title string `json:"title"`
+	Id    uint64 `json:"id"`
+	Title string `json:"title"`
 }
 
-var id uint64
+type Tasks struct {
+	Tasks []Task `json:"tasks"`
+}
+
+func Connect() error {
+	var err error
+	db, err = sql.Open("postgres", fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", host, port, user, password, dbname))
+
+	if err != nil {
+		return err
+	}
+
+	if err = db.Ping(); err != nil {
+		return err
+	}
+
+	return nil
+}
 
 func main() {
+	if err := Connect(); err != nil {
+		log.Fatal(err)
+	}
+
 	app := fiber.New()
 
-  var tasks []Task
+	app.Get("/", func(c *fiber.Ctx) error {
+		rows, err := db.Query("SELECT id, title FROM tasks")
 
-  app.Get("/", func(c *fiber.Ctx) error {
-    return c.JSON(tasks)
-  })
+		if err != nil {
+			return c.Status(500).JSON(err.Error())
+		}
 
-  app.Post("/", func(c *fiber.Ctx) error {
-    task := new(Task)
+		defer rows.Close()
+		result := Tasks{}
 
-    if err := c.BodyParser(task); err != nil {
-      return err
-    }
+		for rows.Next() {
+			task := Task{}
 
-    id++
-    task.Id = id
-    tasks = append(tasks, *task)
+			if err := rows.Scan(&task.Id, &task.Title); err != nil {
+				return err
+			}
 
-    return c.JSON(task)
-  })
+			result.Tasks = append(result.Tasks, task)
+		}
 
-  app.Get("/:id", func (c *fiber.Ctx) error {
-    taskId, err := strconv.ParseUint(c.Params("id"), 10, 64)
+		return c.JSON(result)
+	})
 
-    if err != nil {
-      return err
-    }
+	app.Post("/", func(c *fiber.Ctx) error {
+		task := new(Task)
 
-    for _, s := range tasks {
-      if s.Id == taskId {
-        return c.JSON(s)
-      }
-    }
+		if err := c.BodyParser(task); err != nil {
+			return c.Status(400).JSON(err.Error())
+		}
 
-    return c.JSON(nil)
-  })
+		rows, err := db.Query("INSERT INTO tasks (title) VALUES ($1) RETURNING *", task.Title)
 
-  app.Put("/:id", func(c *fiber.Ctx) error {
-    t := new(Task)
-    taskId, err := strconv.ParseUint(c.Params("id"), 10, 64)
+		if err != nil {
+			return err
+		}
 
-    if err != nil {
-      return err
-    }
+		defer rows.Close()
 
-    if err := c.BodyParser(t); err != nil {
-      return err
-    }
+		result := Task{}
+		for rows.Next() {
+			if err := rows.Scan(&result.Id, &result.Title); err != nil {
+				return err
+			}
+		}
+		return c.JSON(result)
+	})
 
-    for i, s := range tasks {
-      if s.Id == taskId {
-        t.Id = s.Id
-        tasks[i] = *t
-      }
-    }
+	app.Get("/:id", func(c *fiber.Ctx) error {
+		taskId, err := strconv.ParseUint(c.Params("id"), 10, 64)
+		task := new(Task)
 
-    return c.JSON(t)
-  })
+		if err != nil {
+			return err
+		}
 
-  app.Delete("/:id", func(c *fiber.Ctx) error {
-    taskId, err := strconv.ParseUint(c.Params("id"), 10, 64)
+		rows, err := db.Query("SELECT id, title FROM tasks WHERE id=$1", taskId)
 
-    if err != nil {
-      return err
-    }
+		if err != nil {
+			return c.Status(500).JSON(err.Error())
+		}
 
-    var t Task
-    for i, s := range tasks {
-      if s.Id == taskId {
-        t = s
-        tasks = append(tasks[:i], tasks[i + 1:]...)
-      }
-    }
+		defer rows.Close()
 
-    return c.JSON(t)
-  })
+		for rows.Next() {
+			if err := rows.Scan(&task.Id, &task.Title); err != nil {
+				return err
+			}
+		}
 
-  app.Listen(":8000")
+		return c.JSON(task)
+	})
+
+	app.Put("/:id", func(c *fiber.Ctx) error {
+		taskId, err := strconv.ParseUint(c.Params("id"), 10, 64)
+		task := new(Task)
+
+		if err != nil {
+			return err
+		}
+
+		if err := c.BodyParser(task); err != nil {
+			return c.Status(400).JSON(err.Error())
+		}
+
+		_, err = db.Query("UPDATE tasks SET title=$1 WHERE id=$2", task.Title, taskId)
+
+		if err != nil {
+			return err
+		}
+
+		task.Id = taskId
+		return c.Status(201).JSON(task)
+	})
+
+	app.Delete("/:id", func(c *fiber.Ctx) error {
+		taskId, err := strconv.ParseUint(c.Params("id"), 10, 64)
+
+		if err != nil {
+			return err
+		}
+
+		_, err = db.Query("DELETE FROM tasks WHERE id=$1", taskId)
+
+		if err != nil {
+			return err
+		}
+
+		return c.JSON(taskId)
+	})
+
+	log.Fatal(app.Listen(":8000"))
 }
-
